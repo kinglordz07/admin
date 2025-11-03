@@ -6,9 +6,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 final supabase = Supabase.instance.client;
 
 class AdminPanelScreen extends StatefulWidget {
-  final VoidCallback onLogout; // DAGDAG: Add this parameter
+  final VoidCallback onLogout;
   
-  const AdminPanelScreen({super.key, required this.onLogout}); // DAGDAG: Update constructor
+  const AdminPanelScreen({super.key, required this.onLogout});
 
   @override
   State<AdminPanelScreen> createState() => _AdminPanelScreenState();
@@ -31,6 +31,8 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
   List<Map<String, dynamic>> quizzes = [];
   List<Map<String, dynamic>> rooms = [];
   List<Map<String, dynamic>> sessions = [];
+  List<Map<String, dynamic>> mentorQualifications = [];
+  List<Map<String, dynamic>> filteredQualifications = [];
 
   String searchQueryUsers = '';
   String searchQueryActivities = '';
@@ -40,6 +42,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
   String searchQueryQuizzes = '';
   String searchQueryRooms = '';
   String searchQuerySessions = '';
+  String searchQueryQualifications = '';
   
   bool isDarkMode = false;
   int userRoleIndex = 0;
@@ -61,12 +64,13 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     'totalRooms': 0,
     'activeSessions': 0,
     'todayActivities': 0,
+    'pendingQualifications': 0,
   };
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 9, vsync: this);
+    _tabController = TabController(length: 10, vsync: this);
     _loadCurrentUser();
     _loadThemePref();
     _fetchAllData();
@@ -88,7 +92,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              widget.onLogout(); // Call the logout function
+              widget.onLogout();
             },
             child: const Text(
               'Logout',
@@ -150,10 +154,266 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
       _fetchQuizzes(),
       _fetchRooms(),
       _fetchSessions(),
+      _fetchMentorQualifications(), // ✅ FIXED
       _fetchStatistics(),
     ]);
   }
 
+  // ---------------- MENTOR QUALIFICATIONS METHODS ----------------
+  
+  // ✅ FIXED: FETCH MENTOR QUALIFICATIONS
+  Future<void> _fetchMentorQualifications() async {
+    try {
+      debugPrint('🔍 Fetching mentor qualifications...');
+      
+      // ✅ SIMPLE QUERY MUNA - without complex join
+      final res = await supabase
+          .from('mentor_qualifications')
+          .select('*')
+          .order('submitted_at', ascending: false);
+      
+      final data = List<Map<String, dynamic>>.from(res as List);
+      
+      // ✅ DEBUG: Print what we're getting
+      debugPrint('📊 Qualifications found: ${data.length}');
+      for (var qual in data) {
+        debugPrint('   - ID: ${qual['id']}');
+        debugPrint('     User ID: ${qual['user_id']}');
+        debugPrint('     Full Name: ${qual['full_name']}');
+        debugPrint('     Status: ${qual['status']}');
+        debugPrint('     Submitted: ${qual['submitted_at']}');
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        mentorQualifications = data;
+        filteredQualifications = List.from(mentorQualifications);
+      });
+      
+      debugPrint('✅ Fetched ${mentorQualifications.length} mentor qualifications');
+      
+    } catch (e, st) {
+      debugPrint('❌ fetchMentorQualifications error: $e\n$st');
+      
+      // Set empty lists to avoid errors
+      setState(() {
+        mentorQualifications = [];
+        filteredQualifications = [];
+      });
+    }
+  }
+
+  // ✅ FIXED: FILTER QUALIFICATIONS
+  void _filterQualifications(String query) {
+    final q = query.toLowerCase();
+    setState(() {
+      searchQueryQualifications = query;
+      filteredQualifications = mentorQualifications.where((qual) {
+        final fullName = qual['full_name']?.toString().toLowerCase() ?? '';
+        final profession = qual['profession']?.toString().toLowerCase() ?? '';
+        final status = qual['status']?.toString().toLowerCase() ?? '';
+        final email = qual['email']?.toString().toLowerCase() ?? '';
+        
+        return fullName.contains(q) ||
+               profession.contains(q) ||
+               status.contains(q) ||
+               email.contains(q);
+      }).toList();
+    });
+  }
+
+  // ✅ FIXED: VIEW QUALIFICATION DETAILS
+  void _viewQualificationDetails(Map<String, dynamic> qualification) {
+    final isPending = qualification['status'] == 'pending';
+    
+    // ✅ GET DATA DIRECTLY FROM QUALIFICATION
+    final fullName = qualification['full_name'] ?? 'Not provided';
+    final profession = qualification['profession'] ?? 'Not provided';
+    final company = qualification['company'] ?? 'Not provided';
+    final yearsExp = qualification['years_of_experience'] ?? 0;
+    final education = qualification['education'] ?? 'Not provided';
+    final hasExp = qualification['has_mentoring_experience'] ?? false;
+    final expertise = (qualification['expertise_areas'] as List<dynamic>?)?.join(', ') ?? 'None';
+    final hoursPerWeek = qualification['hours_per_week'] ?? 0;
+    final motivation = qualification['motivation'] ?? 'Not provided';
+    final status = qualification['status'] ?? 'pending';
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Mentor Qualification - $fullName'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildQualificationDetail('Full Name', fullName),
+              _buildQualificationDetail('Email', qualification['email'] ?? 'N/A'),
+              _buildQualificationDetail('Profession', profession),
+              _buildQualificationDetail('Company', company),
+              _buildQualificationDetail('Years of Experience', '$yearsExp years'),
+              _buildQualificationDetail('Education', education),
+              _buildQualificationDetail('Mentoring Experience', hasExp ? 'Yes' : 'No'),
+              _buildQualificationDetail('Expertise Areas', expertise),
+              _buildQualificationDetail('Availability', '$hoursPerWeek hours/week'),
+              _buildQualificationDetail('Motivation', motivation),
+              _buildQualificationDetail('Status', status),
+              _buildQualificationDetail('Submitted', _formatDate(qualification['submitted_at'])),
+              if (qualification['reviewed_at'] != null)
+                _buildQualificationDetail('Reviewed', _formatDate(qualification['reviewed_at'])),
+              if (qualification['admin_notes'] != null)
+                _buildQualificationDetail('Admin Notes', qualification['admin_notes'] ?? ''),
+            ],
+          ),
+        ),
+        actions: isPending 
+            ? [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _updateQualificationStatus(qualification, 'rejected');
+                  },
+                  child: const Text('Reject'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _updateQualificationStatus(qualification, 'approved');
+                  },
+                  child: const Text('Approve'),
+                ),
+              ]
+            : [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
+              ],
+      ),
+    );
+  }
+
+  // ✅ FIXED: BUILD QUALIFICATION DETAIL ROW
+  Widget _buildQualificationDetail(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label: ',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              softWrap: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ FIXED: UPDATE QUALIFICATION STATUS
+Future<void> _updateQualificationStatus(Map<String, dynamic> qualification, String status) async {
+  try {
+    final qualificationId = qualification['id'];
+    final userId = qualification['user_id'];
+    
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${status == 'approved' ? 'Approve' : 'Reject'} Qualification?'),
+        content: Text(
+          'Are you sure you want to ${status == 'approved' ? 'approve' : 'reject'} '
+          'the mentor qualification for ${qualification['full_name']}?'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(status == 'approved' ? 'Approve' : 'Reject'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // ✅ FIX: Get the admin's profile ID instead of auth user ID
+    String? adminProfileId;
+    if (_currentUserId != null) {
+      final adminProfile = await supabase
+          .from('profiles_new')
+          .select('id')
+          .eq('id', _currentUserId!)
+          .maybeSingle();
+      
+      adminProfileId = adminProfile?['id'] as String?;
+    }
+
+    // ✅ FIXED UPDATE - use profile ID or null if not found
+    await supabase
+        .from('mentor_qualifications')
+        .update({
+          'status': status,
+          'reviewed_by': adminProfileId, // ✅ Use profile ID, not auth ID
+          'reviewed_at': DateTime.now().toIso8601String(),
+        })
+        .eq('id', qualificationId);
+
+    if (status == 'approved') {
+      await supabase
+          .from('profiles_new')
+          .update({'is_approved': true})
+          .eq('id', userId);
+    }
+
+    await _logActivity(
+      userId: _currentUserId ?? 'admin',
+      username: 'Admin',
+      role: 'admin',
+      action: '${status == 'approved' ? 'Approved' : 'Rejected'} Mentor Qualification',
+      details: '${status == 'approved' ? 'Approved' : 'Rejected'} mentor qualification for ${qualification['full_name']}',
+    );
+
+    await _fetchMentorQualifications();
+    await _fetchUsers();
+    await _fetchStatistics();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '✅ ${status == 'approved' ? 'Approved' : 'Rejected'} mentor qualification for ${qualification['full_name']}'
+          ),
+          backgroundColor: status == 'approved' ? Colors.green : Colors.orange,
+        ),
+      );
+    }
+  } catch (e, st) {
+    debugPrint('❌ updateQualificationStatus error: $e\n$st');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Failed to update qualification: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
   // ---------------- STATISTICS ----------------
   Future<void> _fetchStatistics() async {
     try {
@@ -210,6 +470,19 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
           .select('id')
           .eq('is_live', true);
 
+      // ✅ FIXED: Pending mentor qualifications count
+      int pendingQualificationsCount = 0;
+      try {
+        final qualificationsRes = await supabase
+            .from('mentor_qualifications')
+            .select('id')
+            .eq('status', 'pending');
+        pendingQualificationsCount = (qualificationsRes as List).length;
+      } catch (e) {
+        debugPrint('⚠️ Could not fetch qualifications count: $e');
+        pendingQualificationsCount = 0;
+      }
+
       if (!mounted) return;
 
       setState(() {
@@ -229,6 +502,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
           'totalRooms': (roomsRes as List).length,
           'activeSessions': (sessionsRes as List).length,
           'todayActivities': todayActivities,
+          'pendingQualifications': pendingQualificationsCount,
         };
       });
     } catch (e, st) {
@@ -314,7 +588,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     final res = await supabase
         .from('resources')
         .select('*')
-        .eq('is_removed', false)  // Only get non-removed resources
+        .eq('is_removed', false)
         .order('uploaded_at', ascending: false);
     
     final data = List<Map<String, dynamic>>.from(res as List);
@@ -355,12 +629,10 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     final resourceId = resource['id'];
     debugPrint('🔄 Deleting resource ID: $resourceId');
     
-    // Ensure we have current user
     if (_currentUserId == null) {
       await _loadCurrentUser();
     }
 
-    // Perform soft delete
     await supabase
         .from('resources')
         .update({
@@ -380,7 +652,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
       details: 'Deleted resource: ${resource['title']}',
     );
 
-    // Refresh data
     await _fetchResources();
     await _fetchStatistics();
     
@@ -413,7 +684,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     final res = await supabase
         .from('video_urls')
         .select('*')
-        .eq('is_removed', false)  // Only get non-removed videos
+        .eq('is_removed', false)
         .order('created_at', ascending: false);
     
     final data = List<Map<String, dynamic>>.from(res as List);
@@ -454,7 +725,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     final videoId = video['id'];
     debugPrint('🔄 Deleting video ID: $videoId');
 
-    // Perform soft delete for videos
     await supabase
         .from('video_urls')
         .update({
@@ -473,7 +743,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
       details: 'Deleted video: ${video['title']}',
     );
 
-    // Refresh data
     await _fetchVideos();
     await _fetchStatistics();
     
@@ -546,7 +815,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     final articleId = article['id'];
     debugPrint('🔄 Deleting article ID: $articleId');
 
-    // Articles table doesn't have is_removed, so use hard delete
     await supabase
         .from('articles')
         .delete()
@@ -562,7 +830,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
       details: 'Deleted article: ${article['title']}',
     );
 
-    // Refresh data
     await _fetchArticles();
     await _fetchStatistics();
     
@@ -710,7 +977,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
 
   // ---------------- SUBSCRIPTIONS ----------------
   void _subscribeToChanges() {
-    // Activities subscription
     supabase
         .channel('public:activities')
         .onPostgresChanges(
@@ -735,7 +1001,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
         )
         .subscribe();
 
-    // Users subscription
     supabase
         .channel('public:profiles_new')
         .onPostgresChanges(
@@ -888,17 +1153,15 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
   if (confirmed != true) return;
 
   try {
-    // Show loading indicator
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Deleting user ${user['username']}...'),
-          duration: Duration(seconds: 5),
+          duration: const Duration(seconds: 5),
         ),
       );
     }
 
-    // USE THE DATABASE FUNCTION DIRECTLY
     final result = await supabase.rpc(
       'admin_delete_user_cascade', 
       params: {'target_user_id': user['id']}
@@ -914,7 +1177,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
       details: 'Deleted user: ${user['username']} - $result',
     );
 
-    // If the deleted user is the current user, log them out
     if (isCurrentUser) {
       await supabase.auth.signOut();
       if (mounted) {
@@ -952,7 +1214,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     }
   }
 }
-
 
   Future<void> _approveUser(Map<String, dynamic> user) async {
     try {
@@ -1031,10 +1292,11 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
               _buildStatCard('Resources', stats['totalResources'], Icons.folder, Colors.teal),
               _buildStatCard('Videos', stats['totalVideos'], Icons.video_library, Colors.pink),
               _buildStatCard('Active Sessions', stats['activeSessions'], Icons.video_call, Colors.deepOrange),
+              _buildStatCard('Pending Qualifications', stats['pendingQualifications'], Icons.assignment, Colors.amber),
             ],
           ),
 
-          SizedBox(height: _isMobile ? 16 : 24),
+          const SizedBox(height: 16),
 
           // Quick Actions
           Text('Quick Actions', 
@@ -1042,7 +1304,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
               fontSize: _isMobile ? 18 : 20, 
               fontWeight: FontWeight.bold
             )),
-          SizedBox(height: _isMobile ? 12 : 16),
+          const SizedBox(height: 12),
           Wrap(
             spacing: _isMobile ? 8 : 12,
             runSpacing: _isMobile ? 8 : 12,
@@ -1052,10 +1314,11 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
               _buildQuickAction('Monitor Activities', Icons.monitor, () => _tabController.animateTo(8)),
               _buildQuickAction('Manage Resources', Icons.folder, () => _tabController.animateTo(3)),
               _buildQuickAction('Manage Rooms', Icons.meeting_room, () => _tabController.animateTo(7)),
+              _buildQuickAction('Review Qualifications', Icons.assignment, () => _tabController.animateTo(9)),
             ],
           ),
 
-          SizedBox(height: _isMobile ? 16 : 24),
+          const SizedBox(height: 16),
 
           // Recent Activities
           Text('Recent Activities', 
@@ -1063,7 +1326,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
               fontSize: _isMobile ? 18 : 20, 
               fontWeight: FontWeight.bold
             )),
-          SizedBox(height: _isMobile ? 12 : 16),
+          const SizedBox(height: 12),
           ...activities.take(5).map((activity) => Card(
             margin: EdgeInsets.only(bottom: _isMobile ? 6 : 8),
             child: ListTile(
@@ -1167,7 +1430,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
                       Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: Text('Mentors')),
                     ],
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   TextField(
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.search), 
@@ -1181,7 +1444,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
                       });
                     },
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -1207,7 +1470,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
                       Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Mentors')),
                     ],
                   ),
-                  SizedBox(width: 12),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: TextField(
                       decoration: const InputDecoration(
@@ -1222,7 +1485,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
                       },
                     ),
                   ),
-                  SizedBox(width: 12),
+                  const SizedBox(width: 12),
                   ElevatedButton.icon(
                     onPressed: () => _addOrEditUser(),
                     icon: const Icon(Icons.add),
@@ -1623,6 +1886,150 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
     );
   }
 
+  // ✅ FIXED: MENTOR QUALIFICATIONS TAB
+  Widget _buildMentorQualificationsTab() {
+    return Column(
+      children: [
+        Padding(
+          padding: EdgeInsets.all(_isMobile ? 8 : 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: 'Search qualifications...',
+                    isDense: true,
+                  ),
+                  onChanged: _filterQualifications,
+                ),
+              ),
+              if (!_isMobile) const SizedBox(width: 8),
+              if (!_isMobile)
+                ElevatedButton.icon(
+                  onPressed: _fetchMentorQualifications,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Refresh'),
+                ),
+            ],
+          ),
+        ),
+        if (_isMobile)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _fetchMentorQualifications,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Refresh Qualifications'),
+              ),
+            ),
+          ),
+        Expanded(
+          child: filteredQualifications.isEmpty
+              ? const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.assignment, size: 64, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text(
+                        'No mentor qualifications found',
+                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Qualifications will appear here when mentors submit their applications',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: filteredQualifications.length,
+                  itemBuilder: (context, index) {
+                    final qual = filteredQualifications[index];
+                    
+                    // ✅ FIXED: Use direct qualification data
+                    final displayFullName = qual['full_name'] ?? 'Not Provided';
+                    final displayProfession = qual['profession'] ?? 'Not Provided';
+                    final yearsExp = qual['years_of_experience'] ?? 0;
+                    final status = qual['status'] ?? 'pending';
+                    
+                    Color statusColor = Colors.grey;
+                    IconData statusIcon = Icons.pending;
+                    
+                    switch (status) {
+                      case 'approved':
+                        statusColor = Colors.green;
+                        statusIcon = Icons.check_circle;
+                        break;
+                      case 'rejected':
+                        statusColor = Colors.red;
+                        statusIcon = Icons.cancel;
+                        break;
+                      case 'pending':
+                        statusColor = Colors.orange;
+                        statusIcon = Icons.pending;
+                        break;
+                    }
+
+                    return Card(
+                      margin: EdgeInsets.symmetric(
+                        horizontal: _isMobile ? 8 : 12,
+                        vertical: _isMobile ? 4 : 6,
+                      ),
+                      child: ListTile(
+                        leading: Icon(
+                          Icons.school,
+                          color: statusColor,
+                          size: _isMobile ? 24 : 28,
+                        ),
+                        title: Text(
+                          displayFullName,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: _isMobile ? 14 : 16,
+                          ),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${qual['email'] ?? 'No email'}'),
+                            Text('$displayProfession • $yearsExp years exp'),
+                            Row(
+                              children: [
+                                Icon(statusIcon, size: 14, color: statusColor),
+                                const SizedBox(width: 4),
+                                Text(
+                                  status.toUpperCase(),
+                                  style: TextStyle(
+                                    color: statusColor,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        trailing: Icon(
+                          Icons.arrow_forward_ios,
+                          size: _isMobile ? 16 : 18,
+                          color: Colors.grey,
+                        ),
+                        onTap: () => _viewQualificationDetails(qual),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildResponsiveListTab({
     required List<Map<String, dynamic>> items,
     required String searchQuery,
@@ -1799,7 +2206,6 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
         appBar: AppBar(
           title: const Text('Admin Panel'),
           actions: [
-            // DAGDAG: Logout button
             IconButton(
               icon: const Icon(Icons.logout),
               onPressed: _confirmLogout,
@@ -1837,6 +2243,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
                   _buildTab(Icons.quiz, 'Quizzes'),
                   _buildTab(Icons.meeting_room, 'Rooms'),
                   _buildTab(Icons.history, 'Activities'),
+                  _buildTab(Icons.assignment, 'Qualifications'),
                 ],
               ),
             ),
@@ -1854,6 +2261,7 @@ class _AdminPanelScreenState extends State<AdminPanelScreen>
             _buildQuizzesTab(),
             _buildRoomsTab(),
             _buildActivitiesTab(),
+            _buildMentorQualificationsTab(),
           ],
         ),
       ),
